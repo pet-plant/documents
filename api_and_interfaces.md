@@ -1,16 +1,60 @@
 # APIs & Interfaces
 
-| Component | Description |
-|---|---|
-| [core](#core) | Authentication and device pairing |
-| [registry](#registry) | Plant registration, and which owner, species and device each plant has |
-| [knowledge](#knowledge) | Probe generation from research documents, and its review |
-| [orchestrator](#orchestrator) | Runs the scheduled pipeline |
-| [capture](#capture) | TODO |
-| [assessment](#assessment) | TODO |
-| [advice](#advice) | TODO |
-| [companion](#companion) | TODO |
+| Component                    | Description                                                            |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| [Base Response Envelope](#base-response-envelope) | Standardized API response format for all services      |
+| [core](#core)                 | Authentication and device pairing                                      |
+| [registry](#registry)         | Plant registration, and which owner, species and device each plant has |
+| [knowledge](#knowledge)       | Probe generation from research documents, and its review               |
+| [orchestrator](#orchestrator) | Runs the scheduled pipeline                                            |
+| [capture](#capture)           | TODO                                                                   |
+| [assessment](#assessment)     | TODO                                                                   |
+| [advice](#advice)             | TODO                                                                   |
+| [companion](#companion)       | Character dialogue, plant voice, and care status presented to the web client / UI |
 
+<br>
+
+---
+
+# Base Response Envelope
+
+All API responses across all components follow a standardized top-level envelope (`BaseResponse<T>`). The actual payload model is nested inside the `data` field:
+
+## Success Response (`2xx`)
+
+```json
+{
+  "success": true,
+  "data": { ... },
+  "message": null,
+  "error": null
+}
+```
+
+## Failure Response (`4xx` / `5xx`)
+
+```json
+{
+  "success": false,
+  "data": null,
+  "message": "Human-readable explanation of the error or status.",
+  "error": {
+    "code": "ERROR_CODE",
+    "details": { ... }
+  }
+}
+```
+
+## Envelope Fields
+
+| Field | Type | Requirement | Description |
+| :--- | :--- | :---: | :--- |
+| `success` | `boolean` | **Mandatory** | `true` if the request succeeded (`2xx`), `false` on failure (`4xx`/`5xx`). |
+| `data` | `object` \| `array` \| `null` | **Nullable** | The response payload on success; `null` on failure. |
+| `message` | `string` \| `null` | **Optional (Nullable)** | Human-readable status or diagnostic explanation; `null` if none. |
+| `error` | `object` \| `null` | **Optional (Nullable)** | Structured error details when `success: false`; `null` on success. |
+| `error.code` | `string` | **Mandatory on error** | Machine-readable error code (e.g. `"RESOURCE_NOT_FOUND"`, `"UNAUTHORIZED"`, `"INTERNAL_SERVER_ERROR"`). |
+| `error.details` | `object` \| `null` | **Optional (Nullable)** | Additional contextual validation or debugging information. |
 
 <br>
 
@@ -277,7 +321,6 @@ Revoke a device (user)
 }
 ```
 
-
 ## Interfaces
 
 ### `core.devices.get_device_by_physical_id(session, physical_id)`
@@ -299,7 +342,6 @@ Returns a device → registry
   "created_at": "datetime"
 }
 ```
-
 
 <br>
 
@@ -486,7 +528,6 @@ The plant bound to the given device (user)
 }
 ```
 
-
 ## Interfaces
 
 ### `registry.list_plant_ids(session, owner_id=None, species_code=None, include_archived=False)`
@@ -583,7 +624,6 @@ Returns whether a user owns a plant → any component
 ```json
 "boolean"
 ```
-
 
 <br>
 
@@ -1031,7 +1071,6 @@ A species' approved probes and actions (admin)
 }
 ```
 
-
 ## Interfaces
 
 ### `knowledge.get_species_probes(session, species_code)`
@@ -1102,7 +1141,6 @@ Returns a species → registry
   "common_name": "string | null"
 }
 ```
-
 
 <br>
 
@@ -1216,11 +1254,9 @@ The schedule in effect (admin)
 }
 ```
 
-
 ## Interfaces
 
 None
-
 
 <br>
 
@@ -1234,11 +1270,9 @@ TODO
 
 TODO
 
-
 ## Interfaces
 
 TODO
-
 
 <br>
 
@@ -1252,11 +1286,9 @@ TODO
 
 None
 
-
 ## Interfaces
 
 TODO
-
 
 <br>
 
@@ -1270,11 +1302,9 @@ TODO
 
 None
 
-
 ## Interfaces
 
 TODO
-
 
 <br>
 
@@ -1282,57 +1312,206 @@ TODO
 
 # companion
 
-TODO
+Character dialogue, plant voice, and care status presented to the web client / UI
 
 ## API
 
 ### `GET /companion/devices/me/state`
 
-The character's current state, open issues and idle state for the plant this device shows (device)
+The character's current state, care plan, and 1st-person plant voice message for the plant this device shows (device / client)
 
-**Response**
+**Query**: `plant_id`
+
+The post-VLM pipeline processes daily plant observations and persists state directly to the database. The backend server (MVCS) queries this state via repository/service and exposes `GET /companion/devices/me/state` wrapped in the standard `BaseResponse` envelope (where `data` contains the `CompanionState` object). The web client uses this payload to update the UI across three delivery modes:
+
+1. **Steady / Healthy (`NO_ACTION`)**: Silent timeline update. Green indicator in UI, cheerful companion check-in card, zero alert popup, `care_plan: null`.
+2. **Action Needed (`CARE_ADVICE_REQUIRED`)**: High-priority alert banner, red/amber indicator, interactive care card with prioritized action checklist, 2–3 word button labels, and 1st-person plant voice.
+3. **Fallback Photo Retake (`REQUEST_MORE_INFORMATION`)**: Friendly photo retake prompt in UI when image quality or consensus falls below threshold (`< 0.50`), with `care_plan: null`.
+
+**Response Schema**
 
 ```json
 {
-  "name": "string",
-  "timeLabel": "string",
-  "level": "integer",
-  "xpRatio": "number (0-1)",
-  "dayCount": "integer",
-  "lastWateredLabel": "string",
-  "issues": [
-    {
-      "id": "string (unique, unchanged until the issue is closed)",
-      "status": "thirsty | needs_light | other_problem",
-      "comment": {
-        "text": "string",
-        "dateLabel": "string"
-      },
-      "statusCard": {
-        "statusLabel": "string",
-        "detail": "string",
-        "action": "string"
-      },
-      "action": {
-        "type": "water | move | inspect",
-        "label": "string"
-      }
+  "success": "boolean",
+  "data": {
+    "plant_id": "string",
+    "name": "string",
+    "species": "string",
+    "dayCount": "integer",
+    "timestamp": "datetime (ISO-8601 UTC)",
+    "wateredTimestamp": "datetime (ISO-8601 UTC) | null",
+    "level": "integer",
+    "xpRatio": "float (0.0 - 1.0)",
+    "health_status": "healthy | possibly_unhealthy | unhealthy",
+    "decision": "NO_ACTION | CARE_ADVICE_REQUIRED | REQUEST_MORE_INFORMATION",
+    "companion_message": "string",
+    "care_plan": {
+      "id": "string",
+      "status_label": "string",
+      "assessment": "string",
+      "actions": [
+        {
+          "id": "string",
+          "priority": "integer",
+          "action": "string",
+          "label": "string (max 30 chars)",
+          "type": "water | move | inspect | other"
+        }
+      ]
     }
-  ],
-  "idle": {
-    "status": "happy",
-    "comment": {
-      "text": "string",
-      "dateLabel": "string"
-    },
-    "statusCard": {
-      "statusLabel": "string",
-      "detail": "string",
-      "action": "string"
-    },
-    "action": {
-      "type": "acknowledge",
-      "label": "string"
+  },
+  "message": "string | null",
+  "error": {
+    "code": "string",
+    "details": "object | null"
+  } | null
+}
+```
+
+#### `data` Payload Data Dictionary (Companion State)
+
+| Field | Type | Requirement | Allowed Values | Description & Frontend UI Mapping |
+| :--- | :--- | :---: | :--- | :--- |
+| `plant_id` | `string` | **Mandatory** | String identifier | Target plant ID to route to the correct UI screen. |
+| `name` | `string` | **Mandatory** | Non-empty string (e.g. `"Monty"`) | Plant nickname displayed at the top of the screen. |
+| `species` | `string` | **Mandatory** | Botanical name (e.g. `"Monstera deliciosa"`) | Botanical species reference. |
+| `dayCount` | `integer` | **Mandatory** | $\\ge 1$ | 1-indexed sequential observation counter for this plant. |
+| `timestamp` | `string` | **Mandatory** | ISO-8601 UTC string | Timestamp of the processed scan. |
+| `wateredTimestamp` | `string` \| `null` | **Optional (Nullable)** | ISO-8601 UTC string or `null` | Timestamp of last watering event recorded in `care_events`; `null` if unwatered. |
+| `level` | `integer` | **Mandatory** | $\\ge 1$ (default `1`) | Gamification character level. |
+| `xpRatio` | `float` | **Mandatory** | `0.0` to `1.0` (default `0.0`) | Progress ratio towards next level for UI progress bar. |
+| `health_status` | `string` | **Mandatory** | `"healthy"` \| `"possibly_unhealthy"` \| `"unhealthy"` | Status badge color (Green / Amber / Red). |
+| `decision` | `string` | **Mandatory** | `"NO_ACTION"` \| `"CARE_ADVICE_REQUIRED"` \| `"REQUEST_MORE_INFORMATION"` | Controls whether to render care card, silent timeline, or photo retake prompt. |
+| `companion_message` | `string` | **Mandatory** | Non-empty string | **1st-person speech bubble** spoken by the plant. |
+| `care_plan` | `object` \| `null` | **Optional (Nullable)** | `null` on `NO_ACTION` / `REQUEST_MORE_INFORMATION`, Object on `CARE_ADVICE_REQUIRED` | Detailed botanical action plan (See `care_plan` schema below); `null` when healthy/retake. |
+
+#### `care_plan` Object Schema
+
+| Field | Type | Requirement | Description |
+| :--- | :--- | :---: | :--- |
+| `id` | `string` | **Mandatory** | Unique identifier for this care plan (e.g. `"cp_a7b8c9d0e1f2"`). |
+| `status_label` | `string` | **Mandatory** | Short summary headline for the care card (e.g. `"Overwatering stress"`). |
+| `assessment` | `string` | **Mandatory** | Botanical reasoning explaining root cause (e.g. overwatering, fungal). |
+| `actions` | `list[object]` | **Mandatory** | Ordered list of action items (`[{"id": "...", "priority": 1, ...}]`, see below). |
+
+
+#### `care_plan.actions[]` Object Schema
+
+| Field | Type | Requirement | Allowed Values | Description |
+| :--- | :--- | :---: | :--- | :--- |
+| `id` | `string` | **Mandatory** | e.g. `"act_8e4b1a2c"` | Unique action identifier for tracking user completions. |
+| `priority` | `integer` | **Mandatory** | $\\ge 1$ (1 is highest priority) | Relative priority of the action item. |
+| `action` | `string` | **Mandatory** | Full botanical instruction string | Detailed explanation shown in action card or modal. |
+| `label` | `string` | **Mandatory** | 2–3 words (max 30 chars) | **Short button text** for Web UI (e.g. `"Pause water"`). |
+| `type` | `string` | **Mandatory** | `"water"` \| `"move"` \| `"inspect"` \| `"other"` | Categorical action type for UI iconography and navigation. |
+
+---
+
+**Example: Success Response (`CARE_ADVICE_REQUIRED` - Push Alert & Action Card)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "plant_id": "plant-monstera-1",
+    "name": "Monty",
+    "species": "Monstera deliciosa",
+    "dayCount": 2,
+    "timestamp": "2026-09-22T08:30:00Z",
+    "wateredTimestamp": "2026-09-19T14:20:00Z",
+    "level": 1,
+    "xpRatio": 0.0,
+    "health_status": "unhealthy",
+    "decision": "CARE_ADVICE_REQUIRED",
+    "companion_message": "Hey there! My lower leaves are turning yellow and drooping, just like back when we overwatered in March. Could you pause watering for 5 days so my roots can get some oxygen? 🌿",
+    "care_plan": {
+      "id": "cp_a7b8c9d0e1f2",
+      "status_label": "Overwatering stress",
+      "assessment": "Severe chlorosis and drooping indicates soil moisture saturation leading to root hypoxia. Immediate water restriction is essential.",
+      "actions": [
+        {
+          "id": "act_8e4b1a2c",
+          "priority": 1,
+          "action": "Hold watering for 5 days until top 2 inches of soil are dry to the touch.",
+          "label": "Pause water",
+          "type": "water"
+        },
+        {
+          "id": "act_9f5c2b3d",
+          "priority": 2,
+          "action": "Check drainage holes at the bottom of the pot are unblocked.",
+          "label": "Drain tray",
+          "type": "inspect"
+        },
+        {
+          "id": "act_0a6d3c4e",
+          "priority": 3,
+          "action": "Move to a bright location with indirect sunlight to assist transpiration.",
+          "label": "Move plant",
+          "type": "move"
+        }
+      ]
+    }
+  },
+  "message": null,
+  "error": null
+}
+```
+
+**Example: Success Response (`NO_ACTION` - Silent Green Timeline Update)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "plant_id": "plant-pothos-2",
+    "name": "Perky",
+    "species": "Epipremnum aureum",
+    "dayCount": 5,
+    "timestamp": "2026-09-22T09:00:00Z",
+    "wateredTimestamp": "2026-09-20T10:00:00Z",
+    "level": 1,
+    "xpRatio": 0.0,
+    "health_status": "healthy",
+    "decision": "NO_ACTION",
+    "companion_message": "I'm feeling great today! My leaves are perky and getting plenty of light. 🌱✨",
+    "care_plan": null
+  },
+  "message": null,
+  "error": null
+}
+```
+
+**Example: Error Response (`LLM_UNAVAILABLE`)**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "message": "AI reasoning service (LLM) is currently unavailable. Please verify provider connectivity.",
+  "error": {
+    "code": "LLM_UNAVAILABLE",
+    "details": {
+      "provider": "ollama",
+      "model": "llama3.2:latest",
+      "reason": "Connection refused at http://localhost:11434"
+    }
+  }
+}
+```
+
+**Example: Error Response (`INTERNAL_SERVER_ERROR`)**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "message": "An unexpected internal server error occurred while processing the plant companion state.",
+  "error": {
+    "code": "INTERNAL_SERVER_ERROR",
+    "details": {
+      "request_id": "req_8f1b2c3d4e5f",
+      "reason": "Database connection timeout while querying plant state"
     }
   }
 }
